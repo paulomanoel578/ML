@@ -29,7 +29,7 @@ library(DT)
 #               COMEÇANDO A ESTRUTURAR A MINHA SÉRIE TEMPORAL                  #
 ################################################################################
 series <- ipeadatar::search_series()
-serie <- ipeadata("DERAL12_ATSCAR12", language = "br") %>% 
+serie <- ipeadata("BM12_TJOVER12", language = "br") %>% 
   select(date, value)
 ################################################################################
 #       A SÉRIE TEMPORAL QUE EU ESCOLHI PARA TRABALHAR ELA É DO IPEADATA       #
@@ -40,11 +40,17 @@ skimr::skim(serie)            # UMA BREVE ESTATÍSTICA DESCRITIVA DA MINHA SÉRI
 ################################################################################
 #                           VENDO A VISUALIZAÇÃO DA SÉRIE                      #
 ################################################################################
+previsoes <- function(x){
+  resultado_lista <- list()
+  serie <- x
 
 interativo <- TRUE
-serie %>% 
+
+grafico <- serie %>% 
   plot_time_series(date, value, .interactive = interativo, .title = "Concessões de Crédito", 
                    .plotly_slider = TRUE) 
+
+resultado_lista$grafico <- grafico
 ################################################################################
 #                               CRIANDO A RECEITA                              #
 ################################################################################
@@ -79,7 +85,7 @@ fmla <- as.formula(paste0("value ~ date + ", paste0(names(serie)[-c(1,2)], colla
 splits <- serie %>% 
   time_series_split(assess = "12 months", cumulative = TRUE)
 
-splits %>% 
+grafico_treino <- splits %>% 
   tk_time_series_cv_plan () %>% 
   plot_time_series_cv_plan(date, value, 
     .interactive =  interativo,
@@ -88,6 +94,8 @@ splits %>%
     .x_lab = "Tempo", 
     .plotly_slider = TRUE
   )
+
+resultado_lista$grafico_split <- grafico_treino
 ################################################################################
 #                             DEFININDO OS MODELOS                             #
 ################################################################################
@@ -336,22 +344,23 @@ meas <- calibre_tbl %>%
 meas_ordenado <- meas %>% 
   arrange(mae, rmse, rsq)
 
-meas_ordenado
+resultado_lista$erro_ordenado <- meas_ordenado
 ################################################################################
 #                       VISUALIZANDO OS RESULTADOS                             #
 ################################################################################
 
-calibre_tbl %>% 
+resultado_grafico_treino <- calibre_tbl %>% 
   modeltime_forecast(
     new_data = testing(splits), 
     actual_data = serie, 
-    conf_interval = 0) %>% 
+    conf_interval = 95) %>% 
   plot_modeltime_forecast(
     .interactive = interativo, 
     .title = "Gráfico do Ajuste dos modelos", 
     .color_lab = "Legenda", 
     .plotly_slider = TRUE)
 
+resultado_lista$grafico_treino <- resultado_grafico_treino
 
 resultado <- calibre_tbl %>% 
   filter(.model_desc %in% meas_ordenado$.model_desc[1:5]) %>% 
@@ -420,14 +429,14 @@ meas_model_hibrido_ordenado
 #              VISUALIZANDO OS GRÁFICOS DOS MODELOS COMBINADOS                 #
 ################################################################################
 
-ens_calib_tbl %>% 
+visualizacao_best_models <- ens_calib_tbl %>% 
   modeltime_forecast(
     new_data = testing(splits), 
     actual_data = serie, 
     conf_interval = 0) %>% 
   plot_modeltime_forecast(
     .interactive = interativo, 
-    .title = "Gráfico do Ajuste dos modelos Híbridos", 
+    .title = "Gráfico do Ajuste dos melhores modelos e um combinado", 
     .color_lab = "Legenda", 
     .plotly_slider = TRUE)
 
@@ -443,12 +452,12 @@ modelos_hibridos_resultados_banco <- modelos_hibridos_resultados[[1]][[1]] %>%
 names(modelos_hibridos_resultados_banco) <- c("date","_actual","_prediction","_residuals","_model_desc")
 
 banco_teste_resultados <- bind_rows(banco_selecionado_teste, modelos_hibridos_resultados_banco)
-
+resultado_lista$grafico_modelos_combinados <- visualizacao_best_models
 ################################################################################
 #         CRIANDO UMA TABELA PARA MOSTRAR OS MELHORES MODELOS DE ACORDO COM    #
 #                     OS MELHORES MODELOS NO BANCO DE TESTE                    #
 ################################################################################
-banco_teste_resultados %>% 
+banco_predicao <- banco_teste_resultados %>% 
   mutate(data = as.yearmon(date), 
          data = as.character(data)) %>%
   select(data, `_model_desc`,`_actual`, `_prediction`, `_residuals`) %>% 
@@ -478,7 +487,7 @@ datatable(extensions = c("Buttons", "FixedHeader"),
     backgroundPosition = 'center'
   ) %>% 
   formatCurrency(c("_actual", "_prediction", "_residuals"), currency = "", interval = 3, mark = ".", dec.mark = ",")
-
+resultado_lista$tabela_predicao <- banco_predicao
 ################################################################################
 #                  VISUALIZANDO SOMENTE OS MELHORES MODELOS                    #
 ################################################################################
@@ -510,12 +519,12 @@ refit_tabela <- modelos_melhores_tables %>%
 #                             PREVISÃO DE NOVOS VALORES                        #
 ################################################################################
 
-refit_tabela %>% 
+previsao_grafico <- refit_tabela %>% 
   modeltime_forecast(
     new_data = serie,
     h = "1 year", 
     actual_data = serie, 
-    conf_interval = 0
+    conf_interval = 80
   ) %>% 
   plot_modeltime_forecast(
     .interactive = interativo, 
@@ -523,6 +532,8 @@ refit_tabela %>%
     .color_lab = "Legenda", 
     .plotly_slider = TRUE
   )
+
+resultado_lista$previsao_grafico <- previsao_grafico
 
 novas_previsões <- refit_tabela %>% 
   modeltime_forecast(
@@ -536,7 +547,7 @@ novas_previsões <- novas_previsões %>%
 #         CRIANDO UMA TABELA PARA MOSTRAR OS MELHORES MODELOS DE ACORDO COM    #
 #                     OS MELHORES MODELOS NO BANCO REFITADO                    #
 ################################################################################
-novas_previsões %>% 
+novas_previsoes_tabela <- novas_previsões %>% 
   mutate(data = as.yearmon(.index), 
          data = as.character(data)) %>%
   select(data, .model_desc, .value, .conf_lo, .conf_hi) %>% 
@@ -559,4 +570,16 @@ novas_previsões %>%
               )), colnames = c("Data", "Modelo", "Valor Pontual", "Limite Inferior", "Limite Superior")
     ) %>% 
   formatCurrency(c(".value", ".conf_lo", ".conf_hi"), currency = "", interval = 3, mark = ".", dec.mark = ",")
-  
+resultado_lista$novas_previsoes_tabela <- novas_previsoes_tabela
+return(resultado_lista)
+}
+
+resultado <- previsoes(x = serie)
+resultado$erro_ordenado
+resultado$grafico
+resultado$grafico_split
+resultado$grafico_treino
+resultado$grafico_modelos_combinados
+resultado$tabela_predicao
+resultado$previsao_grafico
+resultado$novas_previsoes_tabela
